@@ -81,7 +81,7 @@ void trimStrings(char *string) {
 
 void printVotesPerParty(){
     votesPerParty *current = globalData.votesPerPartyList;
-    FILE *file = fopen(globalData.pollStats, "a");
+    FILE *file = fopen(globalData.pollStats, "input.txt");
     char string[50];
     char numStr[20]; // Buffer to hold the string representation of the integer
     while(current != NULL){
@@ -184,12 +184,15 @@ void *workerThread(void *args) {
     sigaddset(&set, SIGINT);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
-    lockMutex(mtx);
-    GlobalData *data = (GlobalData *) args;
-    while (data->counter == 0 && !terminateThreadSIGINT) {
-        pthread_cond_wait(&condNotEmpty, &mtx);
-    }
-    if (!terminateThreadSIGINT) {
+
+    while(!terminateThreadSIGINT) {
+        lockMutex(mtx);
+        GlobalData *data = (GlobalData *) args;
+        while (data->counter == 0 && !terminateThreadSIGINT) {
+            pthread_cond_wait(&condNotEmpty, &mtx);
+        }
+        if(terminateThreadSIGINT)
+            break;
         char sendNameMessage[] = "SEND NAME PLEASE\n";
         write(data->bufferArray[data->start], sendNameMessage, strlen(sendNameMessage));
         char bufferName[100];
@@ -203,19 +206,22 @@ void *workerThread(void *args) {
 
         if (!findName(globalData.voterList, bufferName)) {
             addVote(&globalData.voterList, bufferName, bufferVote);
-            data->start = (data->start + 1) % data->bufferSize;
-            data->counter--;
             strcat(bufferName, " ");
             strcat(bufferName, bufferVote);
             strcat(bufferName, "\n");
             printf("Name and Vote is %s", bufferName);
-            FILE *file = fopen(data->pollLog, "a");
+            FILE *file = fopen(data->pollLog, "input.txt");
             fwrite(bufferName, sizeof(char), strlen(bufferName), file);
             fclose(file);
-            pthread_cond_signal(&condNotFull);
         } else {
-            printf("Voter already voted\n");
+            char alreadyVotedMsg[] = "ALREADY VOTED\n";
+            write(data->bufferArray[data->start], alreadyVotedMsg, strlen(alreadyVotedMsg));
         }
+        close(data->bufferArray[data->start]);
+        data->start = (data->start + 1) % data->bufferSize;
+        data->counter--;
+        pthread_cond_signal(&condNotFull);
+        unlockMutex(mtx);
     }
     unlockMutex(mtx);
     pthread_exit(NULL);
