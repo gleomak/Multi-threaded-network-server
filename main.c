@@ -79,32 +79,32 @@ void trimStrings(char *string) {
     }
 }
 
-void printVotesPerParty(){
+void printVotesPerParty() {
     votesPerParty *current = globalData.votesPerPartyList;
-    FILE *file = fopen(globalData.pollStats, "input.txt");
+    FILE *file = fopen(globalData.pollStats, "w");
     char string[50];
     char numStr[20]; // Buffer to hold the string representation of the integer
-    while(current != NULL){
-        strcpy(string,"");
+    while (current != NULL) {
+        strcpy(string, "");
         strcat(string, current->partyName);
         strcat(string, " ");
         sprintf(numStr, "%d", current->votes);
         strcat(string, numStr);
         strcat(string, "\n");
         fwrite(string, sizeof(char), strlen(string), file);
-        current = (votesPerParty *)current->next;
+        current = (votesPerParty *) current->next;
     }
     fclose(file);
 }
 
 int findParty(votesPerParty *vpp, char *party) {
     votesPerParty *current = vpp;
-    while(current != NULL){
-        if(strcmp(current->partyName, party) == 0){
-            current->votes ++;
+    while (current != NULL) {
+        if (strcmp(current->partyName, party) == 0) {
+            current->votes++;
             return 1;
         }
-        current = (votesPerParty *)current->next;
+        current = (votesPerParty *) current->next;
     }
     return 0;
 }
@@ -152,7 +152,7 @@ void addVote(VoteTuple **vt, char *name, char *vote) {
         current->next = (struct VoteTuple *) newNode;
     }
 
-    if(!findParty(globalData.votesPerPartyList, vote))
+    if (!findParty(globalData.votesPerPartyList, vote))
         addParty(&globalData.votesPerPartyList, vote);
 }
 
@@ -185,33 +185,40 @@ void *workerThread(void *args) {
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
 
-    while(!terminateThreadSIGINT) {
+    while (!terminateThreadSIGINT) {
         lockMutex(mtx);
         GlobalData *data = (GlobalData *) args;
         while (data->counter == 0 && !terminateThreadSIGINT) {
             pthread_cond_wait(&condNotEmpty, &mtx);
         }
-        if(terminateThreadSIGINT)
+        if (terminateThreadSIGINT)
             break;
         char sendNameMessage[] = "SEND NAME PLEASE\n";
         write(data->bufferArray[data->start], sendNameMessage, strlen(sendNameMessage));
-        char bufferName[100];
-        read(data->bufferArray[data->start], bufferName, 100);
+        char bufferName[30];
+        memset(bufferName, '\0', sizeof(bufferName));
+        read(data->bufferArray[data->start], bufferName, 30);
         char sendVoteMessage[] = "SEND VOTE PLEASE\n";
         write(data->bufferArray[data->start], sendVoteMessage, strlen(sendVoteMessage));
-        char bufferVote[50];
-        read(data->bufferArray[data->start], bufferVote, 100);
+        char bufferVote[20];
+        memset(bufferVote, '\0', sizeof(bufferVote));
+        read(data->bufferArray[data->start], bufferVote, 20);
+        printf("buffer Name before trim is %s\n", bufferName);
         trimStrings(bufferName);
         trimStrings(bufferVote);
-
+        printf("buffer Name is %s\n", bufferName);
+        printf("buffer Vote is %s\n", bufferVote);
+        char bufferConcatenated[50];
+        strcpy(bufferConcatenated, "");
         if (!findName(globalData.voterList, bufferName)) {
             addVote(&globalData.voterList, bufferName, bufferVote);
-            strcat(bufferName, " ");
-            strcat(bufferName, bufferVote);
-            strcat(bufferName, "\n");
-            printf("Name and Vote is %s", bufferName);
-            FILE *file = fopen(data->pollLog, "input.txt");
-            fwrite(bufferName, sizeof(char), strlen(bufferName), file);
+            strcat(bufferConcatenated, bufferName);
+            strcat(bufferConcatenated, " ");
+            strcat(bufferConcatenated, bufferVote);
+            strcat(bufferConcatenated, "\n");
+            printf("Name and Vote is %s", bufferConcatenated);
+            FILE *file = fopen(data->pollLog, "a");
+            fwrite(bufferConcatenated, sizeof(char), strlen(bufferConcatenated), file);
             fclose(file);
         } else {
             char alreadyVotedMsg[] = "ALREADY VOTED\n";
@@ -226,7 +233,6 @@ void *workerThread(void *args) {
     unlockMutex(mtx);
     pthread_exit(NULL);
 }
-
 
 
 int main(int argc, char **argv) {
@@ -297,7 +303,7 @@ int main(int argc, char **argv) {
         pthread_cond_signal(&condNotEmpty);
         unlockMutex(mtx);
     }
-
+    printf("HERE\n");
     int lastInsertions;
     lockMutex(mtx);
     lastInsertions = globalData.counter;

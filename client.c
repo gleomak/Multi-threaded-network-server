@@ -9,13 +9,13 @@
 #include <pthread.h>
 
 typedef struct{
-    char *voterName;
-    char *partyName;
+    char voterName[30];
+    char partyName[20];
 }voterAndParty;
 
-int sock;
-struct sockaddr_in server;
-struct sockaddr *serverptr = (struct sockaddr*)&server;
+int portNum;
+char serverName[30];
+
 
 
 voterAndParty *fillVoterAndPartyArray(char *inputFile, int *counter) {
@@ -32,16 +32,38 @@ voterAndParty *fillVoterAndPartyArray(char *inputFile, int *counter) {
     voterAndParty *array = (voterAndParty *) malloc((*counter) * sizeof(voterAndParty));
     (*counter) = 0;
     while(fgets(line, sizeof(line), file)){
-        array[(*counter)].voterName = strtok(line, " ");
-        array[(*counter)++].partyName = strtok(NULL, "");
+        strcpy(array[(*counter)].voterName,strtok(line, " "));
+        strcpy(array[(*counter)++].partyName,strtok(NULL, " "));
+        printf("Voter Name : %s and vote is : %s\n",array[(*counter)-1].voterName, array[(*counter)-1].partyName);
     }
     fclose(file);
     return array;
 }
 
 void * clientThread(void * args){
+
+    struct hostent *rem;
+    int sock;
+    /* Create socket */
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Socket error\n");
+        exit(EXIT_FAILURE);
+    }
+    /* Find server address */
+    if ((rem = gethostbyname(serverName)) == NULL) {
+        printf("Get Host By Name error\n");
+        exit(EXIT_FAILURE);
+    }
+    struct sockaddr_in server;
+    struct sockaddr *serverptr = (struct sockaddr*)&server;
+    server.sin_family = AF_INET;       /* Internet domain */
+    memcpy(&server.sin_addr, rem->h_addr, rem->h_length);
+    server.sin_port = htons(portNum);         /* Server port */
+
+
     voterAndParty *vap = (voterAndParty *)args;
     char buffer[50];
+    memset(buffer, '\0', sizeof(buffer));
     if (connect(sock, serverptr, sizeof(server)) < 0) {
         printf("connect");
         exit(EXIT_FAILURE);
@@ -51,7 +73,7 @@ void * clientThread(void * args){
         exit(EXIT_FAILURE);
     }
     if(strcmp(buffer, "SEND NAME PLEASE\n") !=0){
-        printf("ERROR WITH READ MESSAGE\n");
+        printf("ERROR WITH READ MESSAGE %s\n",buffer);
         exit(EXIT_FAILURE);
     }
     size_t n = strlen(vap->voterName);
@@ -69,6 +91,7 @@ void * clientThread(void * args){
         memset(buffer, '\0', sizeof(buffer));
         read(sock, buffer, 50);
     }
+    close(sock);
     pthread_exit(NULL);
 }
 
@@ -77,8 +100,8 @@ int main(int argc, char **argv){
         printf("Insufficient number of arguments, exiting.\n");
         exit(EXIT_FAILURE);
     }
-    char *serverName = argv[1];
-    int portNum = atoi(argv[2]);
+    strcpy(serverName, argv[1]);
+    portNum = atoi(argv[2]);
     char *inputFile = argv[3];
 
     FILE* file = fopen(inputFile, "r");
@@ -90,22 +113,6 @@ int main(int argc, char **argv){
     voterAndParty *voterAndPartyArray = fillVoterAndPartyArray(inputFile, &arraySize);
     pthread_t *workers = (pthread_t *) malloc(arraySize * sizeof(pthread_t));
 
-    int port;
-    struct hostent *rem;
-    /* Create socket */
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("Socket error\n");
-        exit(EXIT_FAILURE);
-    }
-    /* Find server address */
-    if ((rem = gethostbyname(serverName)) == NULL) {
-        printf("Get Host By Name error\n");
-        exit(EXIT_FAILURE);
-    }
-    port = atoi(argv[2]); /*Convert port number to integer*/
-    server.sin_family = AF_INET;       /* Internet domain */
-    memcpy(&server.sin_addr, rem->h_addr, rem->h_length);
-    server.sin_port = htons(port);         /* Server port */
 
     for(int i = 0 ; i < arraySize ; i++){
         pthread_create(&workers[i], 0, clientThread, (void *)&voterAndPartyArray[i]);
