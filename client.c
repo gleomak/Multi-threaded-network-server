@@ -9,12 +9,12 @@
 #include <pthread.h>
 
 typedef struct{
-    char voterName[30];
+    char voterName[40];
     char partyName[20];
 }voterAndParty;
 
 int portNum;
-char serverName[30];
+char serverName[40];
 
 
 
@@ -28,15 +28,19 @@ voterAndParty *fillVoterAndPartyArray(char *inputFile, int *counter) {
     while (fgets(line, sizeof(line), file) != NULL){
         (*counter)++;
     }
-    fseek(file, 0, SEEK_SET);
+    fclose(file);
+    FILE *file2 = fopen(inputFile, "r");
     voterAndParty *array = (voterAndParty *) malloc((*counter) * sizeof(voterAndParty));
     (*counter) = 0;
-    while(fgets(line, sizeof(line), file)){
-        strcpy(array[(*counter)].voterName,strtok(line, " "));
-        strcpy(array[(*counter)++].partyName,strtok(NULL, " "));
-        printf("Voter Name : %s and vote is : %s\n",array[(*counter)-1].voterName, array[(*counter)-1].partyName);
+    while(fgets(line, sizeof(line), file2)){
+        memset(array[(*counter)].voterName, '\0', sizeof(array[(*counter)].voterName));
+        memset(array[(*counter)].partyName, '\0', sizeof(array[(*counter)].partyName));
+        strcat(array[(*counter)].voterName,strtok(line, " "));
+        strcat(array[(*counter)].voterName," ");
+        strcat(array[(*counter)].voterName, strtok(NULL, " "));
+        strcat(array[(*counter)++].partyName,strtok(NULL, " "));
     }
-    fclose(file);
+    fclose(file2);
     return array;
 }
 
@@ -69,7 +73,7 @@ void * clientThread(void * args){
         exit(EXIT_FAILURE);
     }
     if (read(sock, buffer, 50) < 0){
-        printf("READ error\n");
+        perror("Error in read");
         exit(EXIT_FAILURE);
     }
     if(strcmp(buffer, "SEND NAME PLEASE\n") !=0){
@@ -79,17 +83,28 @@ void * clientThread(void * args){
     size_t n = strlen(vap->voterName);
     write(sock, vap->voterName, n);
     memset(buffer, '\0', sizeof(buffer));
-    read(sock, buffer, 50);
+
+    if((read(sock, buffer, 50)) < 0){
+        fprintf(stderr,"READ ERROR\n");
+    }
     if(strcmp(buffer, "SEND VOTE PLEASE\n") != 0){
-        if(strcmp(buffer, "ALREADY VOTED") != 0){
-            printf("ERROR WITH VOTE MESSAGE\n");
+        if(strcmp(buffer, "ALREADY VOTED\n") != 0){
+            perror("Error in read");
             exit(EXIT_FAILURE);
         }
     }else{
         size_t n2 = strlen(vap->partyName);
         write(sock, vap->partyName, n2);
         memset(buffer, '\0', sizeof(buffer));
-        read(sock, buffer, 50);
+        if((read(sock, buffer, 50)) < 0){
+            perror("Error in read");
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (shutdown(sock, SHUT_RDWR) == -1) {
+        perror("Error in client shutdown");
+        // Handle error
+        exit(EXIT_FAILURE);
     }
     close(sock);
     pthread_exit(NULL);
@@ -109,17 +124,18 @@ int main(int argc, char **argv){
         perror("Failed to open file");
         exit(EXIT_FAILURE);
     }
+    fclose(file);
     int arraySize = 0;
     voterAndParty *voterAndPartyArray = fillVoterAndPartyArray(inputFile, &arraySize);
     pthread_t *workers = (pthread_t *) malloc(arraySize * sizeof(pthread_t));
-
 
     for(int i = 0 ; i < arraySize ; i++){
         pthread_create(&workers[i], 0, clientThread, (void *)&voterAndPartyArray[i]);
     }
     for (int i = 0; i < arraySize ; i++) {
-        pthread_join(workers[i], 0);
+        pthread_join(workers[i], NULL);
     }
-
+    free(voterAndPartyArray);
+    free(workers);
     return 0;
 }

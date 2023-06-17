@@ -3,7 +3,6 @@
 #include <sys/types.h>         /* sockets */
 #include <sys/socket.h>         /* sockets */
 #include <netinet/in.h>         /* internet sockets */
-#include <netdb.h>             /* gethostbyaddr */
 #include <pthread.h>
 #include <stdlib.h>             /* exit */
 #include <signal.h>          /* signal */
@@ -84,6 +83,7 @@ void printVotesPerParty() {
     FILE *file = fopen(globalData.pollStats, "w");
     char string[50];
     char numStr[20]; // Buffer to hold the string representation of the integer
+
     while (current != NULL) {
         strcpy(string, "");
         strcat(string, current->partyName);
@@ -166,6 +166,22 @@ int findName(VoteTuple *vt, const char *name) {
     return 0;
 }
 
+void freeLists(VoteTuple *vt, votesPerParty *vpp){
+    VoteTuple *temp;
+    while (vt != NULL){
+        temp = vt;
+        vt = (VoteTuple *)vt->next;
+        free(temp);
+    }
+
+    votesPerParty *temp2;
+    while (vpp != NULL){
+        temp2 = vpp;
+        vpp = (votesPerParty *)vpp->next;
+        free(temp2);
+    }
+}
+
 void initializeGlobalData(GlobalData *gd, int bufferSize, char *pollLog, char *pollStats) {
     gd->bufferSize = bufferSize;
     gd->end = -1;
@@ -193,22 +209,30 @@ void *workerThread(void *args) {
         }
         if (terminateThreadSIGINT)
             break;
+
         char sendNameMessage[] = "SEND NAME PLEASE\n";
         write(data->bufferArray[data->start], sendNameMessage, strlen(sendNameMessage));
-        char bufferName[30];
+        char bufferName[40];
         memset(bufferName, '\0', sizeof(bufferName));
-        read(data->bufferArray[data->start], bufferName, 30);
+
+        if((read(data->bufferArray[data->start], bufferName, 40)) < 0){
+            perror("READ ERROR");
+            exit(EXIT_FAILURE);
+        }
+
         char sendVoteMessage[] = "SEND VOTE PLEASE\n";
         write(data->bufferArray[data->start], sendVoteMessage, strlen(sendVoteMessage));
         char bufferVote[20];
         memset(bufferVote, '\0', sizeof(bufferVote));
-        read(data->bufferArray[data->start], bufferVote, 20);
-        printf("buffer Name before trim is %s\n", bufferName);
+        if((read(data->bufferArray[data->start], bufferVote, 20)) < 0){
+            perror("READ ERROR");
+            exit(EXIT_FAILURE);
+        }
+
         trimStrings(bufferName);
         trimStrings(bufferVote);
-        printf("buffer Name is %s\n", bufferName);
-        printf("buffer Vote is %s\n", bufferVote);
-        char bufferConcatenated[50];
+        char bufferConcatenated[60];
+
         strcpy(bufferConcatenated, "");
         if (!findName(globalData.voterList, bufferName)) {
             addVote(&globalData.voterList, bufferName, bufferVote);
@@ -216,7 +240,6 @@ void *workerThread(void *args) {
             strcat(bufferConcatenated, " ");
             strcat(bufferConcatenated, bufferVote);
             strcat(bufferConcatenated, "\n");
-            printf("Name and Vote is %s", bufferConcatenated);
             FILE *file = fopen(data->pollLog, "a");
             fwrite(bufferConcatenated, sizeof(char), strlen(bufferConcatenated), file);
             fclose(file);
@@ -224,6 +247,13 @@ void *workerThread(void *args) {
             char alreadyVotedMsg[] = "ALREADY VOTED\n";
             write(data->bufferArray[data->start], alreadyVotedMsg, strlen(alreadyVotedMsg));
         }
+
+        if (shutdown(data->bufferArray[data->start], SHUT_RDWR) == -1) {
+            perror("Error in shutdown");
+            // Handle error
+            exit(EXIT_FAILURE);
+        }
+
         close(data->bufferArray[data->start]);
         data->start = (data->start + 1) % data->bufferSize;
         data->counter--;
@@ -263,6 +293,7 @@ int main(int argc, char **argv) {
     server.sin_family = AF_INET;       /* Internet domain */
     server.sin_addr.s_addr = htonl(INADDR_ANY);
     server.sin_port = htons(portnum);      /* The given port */
+
     /* Bind socket to address */
     if (bind(sock, serverptr, sizeof(server)) < 0)
         exit(EXIT_FAILURE);
@@ -292,7 +323,6 @@ int main(int argc, char **argv) {
                 exit(EXIT_FAILURE);
             }
         }
-
         lockMutex(mtx);
         while (globalData.counter == globalData.bufferSize) {
             pthread_cond_wait(&condNotFull, &mtx);
@@ -300,10 +330,9 @@ int main(int argc, char **argv) {
         globalData.end = (globalData.end + 1) % bufferSize;
         globalData.bufferArray[globalData.end] = newSock;
         globalData.counter++;
-        pthread_cond_signal(&condNotEmpty);
+        pthread_cond_broadcast(&condNotEmpty);
         unlockMutex(mtx);
     }
-    printf("HERE\n");
     int lastInsertions;
     lockMutex(mtx);
     lastInsertions = globalData.counter;
@@ -318,10 +347,16 @@ int main(int argc, char **argv) {
     unlockMutex(mtx);
 
     for (int i = 0; i < numOfWorkingThreads; i++) {
-        pthread_join(workers[i], 0);
+        pthread_join(workers[i], NULL);
     }
+
+    free(workers);
+    free(globalData.bufferArray);
+    freeLists(globalData.voterList, globalData.votesPerPartyList);
+
     pthread_cond_destroy(&condNotEmpty);
     pthread_cond_destroy(&condNotFull);
     pthread_mutex_destroy(&mtx);
+
     return 0;
 }
